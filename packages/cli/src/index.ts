@@ -25,6 +25,7 @@ import {
 import {
   StellarDIDCreditSDK,
   scoringWeightsToScVal,
+  type DisputeRecord,
   type VCRecord,
   type ScoringWeights,
 } from "@stellar-did-credit/sdk";
@@ -296,6 +297,13 @@ function printVCRecords(records: VCRecord[]): void {
     console.log("└─────────────────────────────────────┘");
   }
   console.log();
+}
+
+function printDisputeRecord(record: DisputeRecord): void {
+  console.log(`Dispute for ${record.inputKey} [${record.status}]`);
+  console.log(`  Subject:      ${record.subject}`);
+  console.log(`  Reason:       ${record.reason}`);
+  console.log(`  Filed Ledger: ${record.filedAtLedger}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +666,89 @@ program
       process.exit(1);
     }
   });
+
+// ---------------------------------------------------------------------------
+// Command group: disputes
+// ---------------------------------------------------------------------------
+
+const disputes = program
+  .command("disputes")
+  .description("List and fetch credit score input disputes.");
+
+disputes
+  .command("list")
+  .description("List disputes filed by a subject.")
+  .argument("<subject-address>", "Stellar G... address of the subject")
+  .option("--json", "Output as JSON")
+  .action(async (subjectAddress: string, cmdOptions: { json?: boolean }) => {
+    const globalOptions = program.opts();
+    const network = globalOptions.network as NetworkType;
+    const config = loadConfig(network);
+    validateConfig(config, ["creditOracleId"], true);
+    const upperAddr = subjectAddress.toUpperCase();
+    assertStellarAddress("subject-address", upperAddr);
+
+    const sdk = new StellarDIDCreditSDK(config);
+    if (!cmdOptions.json) {
+      console.log(`Fetching disputes for ${upperAddr} on ${network}...`);
+    }
+
+    try {
+      const records = await sdk.listDisputes(upperAddr);
+      if (cmdOptions.json) {
+        console.log(JSON.stringify(records, null, 2));
+      } else if (records.length === 0) {
+        console.log("No disputes found for this subject.");
+      } else {
+        console.log();
+        records.forEach(printDisputeRecord);
+      }
+    } catch (err) {
+      console.error("Failed:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  });
+
+disputes
+  .command("get")
+  .description("Fetch a dispute for one of a subject's score inputs.")
+  .argument("<subject-address>", "Stellar G... address of the subject")
+  .argument("<input-key>", "Disputed input key: tx_stats, repayment, or vc_count")
+  .option("--json", "Output as JSON")
+  .action(
+    async (
+      subjectAddress: string,
+      inputKey: string,
+      cmdOptions: { json?: boolean },
+    ) => {
+      const globalOptions = program.opts();
+      const network = globalOptions.network as NetworkType;
+      const config = loadConfig(network);
+      validateConfig(config, ["creditOracleId"], true);
+      const upperAddr = subjectAddress.toUpperCase();
+      assertStellarAddress("subject-address", upperAddr);
+
+      const sdk = new StellarDIDCreditSDK(config);
+      if (!cmdOptions.json) {
+        console.log(`Fetching ${inputKey} dispute for ${upperAddr} on ${network}...`);
+      }
+
+      try {
+        const record = await sdk.getDispute(upperAddr, inputKey);
+        if (cmdOptions.json) {
+          console.log(JSON.stringify(record, null, 2));
+        } else if (record === null) {
+          console.log(`No dispute found for ${inputKey}.`);
+        } else {
+          console.log();
+          printDisputeRecord(record);
+        }
+      } catch (err) {
+        console.error("Failed:", err instanceof Error ? err.message : err);
+        process.exit(1);
+      }
+    },
+  );
 
 // ---------------------------------------------------------------------------
 // Command: credential-type
