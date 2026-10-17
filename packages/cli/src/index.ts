@@ -1497,6 +1497,86 @@ governance
     },
   );
 
+async function runPauseCommand(params: {
+  action: "pause" | "unpause";
+  target: "identity" | "credit" | "revocation";
+  adminSecret: string;
+  dryRun?: boolean;
+}): Promise<void> {
+  const { action, target, adminSecret } = params;
+  const network = program.opts().network as NetworkType;
+  const config = loadConfig(network);
+  const targetConfig = {
+    identity: { configKey: "identityOracleId", contractName: "identity-oracle" },
+    credit: { configKey: "creditOracleId", contractName: "credit-oracle" },
+    revocation: { configKey: "revocationRegistryId", contractName: "revocation-registry" },
+  }[target];
+  validateConfig(config, [targetConfig.configKey]);
+
+  const contractId = config[targetConfig.configKey]!;
+  const keypair = parseSecret(adminSecret);
+  if (params.dryRun) {
+    const contract = new Contract(contractId);
+    const operation = contract.call(
+      action,
+      ...(target === "credit" ? [new Address(keypair.publicKey()).toScVal()] : []),
+    );
+    await simulateDryRun({
+      rpcUrl: config.rpcUrl,
+      networkPassphrase: config.networkPassphrase,
+      sourceKeypair: keypair,
+      contractId,
+      operation,
+      label: `${action} ${targetConfig.contractName}`,
+    });
+    return;
+  }
+
+  const sdk = new StellarDIDCreditSDK(config);
+  let txHash: string;
+  if (target === "identity") {
+    txHash = action === "pause"
+      ? await sdk.pauseIdentityOracle(keypair)
+      : await sdk.unpauseIdentityOracle(keypair);
+  } else if (target === "credit") {
+    txHash = action === "pause"
+      ? await sdk.pauseCreditOracle(keypair)
+      : await sdk.unpauseCreditOracle(keypair);
+  } else {
+    txHash = action === "pause"
+      ? await sdk.pauseRevocationRegistry(keypair)
+      : await sdk.unpauseRevocationRegistry(keypair);
+  }
+
+  console.log(`${action === "pause" ? "Pausing" : "Unpausing"} ${targetConfig.contractName} on ${network}...`);
+  console.log(`  Admin: ${keypair.publicKey()}`);
+  console.log();
+  console.log("Success!");
+  console.log(`  Transaction: ${txHash}`);
+}
+
+for (const action of ["pause", "unpause"] as const) {
+  const commandGroup = program
+    .command(action)
+    .description(`${action === "pause" ? "Pause" : "Unpause"} contract write operations.`);
+
+  for (const target of ["identity", "credit", "revocation"] as const) {
+    commandGroup
+      .command(target)
+      .description(`${action === "pause" ? "Pause" : "Unpause"} the ${target} contract (admin only).`)
+      .argument("<admin-secret>", "Stellar secret key of the contract admin (starts with S)")
+      .option("--dry-run", "Simulate transaction execution without broadcasting")
+      .action(async (adminSecret: string, cmdOptions: { dryRun?: boolean }) => {
+        try {
+          await runPauseCommand({ action, target, adminSecret, dryRun: cmdOptions.dryRun });
+        } catch (err) {
+          console.error("Failed:", err instanceof Error ? err.message : err);
+          process.exit(1);
+        }
+      });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Parse
 // ---------------------------------------------------------------------------
