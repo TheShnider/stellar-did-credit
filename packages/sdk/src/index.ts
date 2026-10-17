@@ -1939,13 +1939,13 @@ export class StellarDIDCreditSDK {
 
     const sourceAccount = new Account(this.config.simAccount, "0");
     const tx = new TransactionBuilder(sourceAccount, {
-      fee: BASE_FEE,
+      fee: this.config.baseFee || BASE_FEE,
       networkPassphrase: this.config.networkPassphrase,
     })
       .addOperation(
         contract.call("is_verified", new Address(subjectAddress).toScVal()),
       )
-      .setTimeout(30)
+      .setTimeout(this.config.timeoutSeconds ?? 30)
       .build();
 
     const sim = await server.simulateTransaction(tx);
